@@ -1,0 +1,69 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+*.elf
+*.hex
+*.bin
+
+# CMake build outputs
+cmake-build-*/
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.ninja
+*.ninja_log
+*.ninja_deps
+compile_commands.json
+
+# PlatformIO build outputs and caches
+.pio/
+.pioenvs/
+.piolibdeps/
+.clangd/
+
+# JetBrains / CLion
+.idea/
+*.iws
+*.iml
+
+# Visual Studio Code
+.vscode/
+
+# ImGui & runtime temporary files
+imgui.ini
+*.log
+
+# OS-generated files
+.DS_Store
+Thumbs.db

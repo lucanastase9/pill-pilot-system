@@ -1,0 +1,3 @@
+Roll:  P=1 I=0 D=0
+Pitch: P=1 I=0 D=0
+Yaw:   P=1 I=0 D=0
