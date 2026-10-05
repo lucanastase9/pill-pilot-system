@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 ESCManager::ESCManager(uint8_t m1, uint8_t m2, uint8_t m3, uint8_t m4)
-    : armed(false) {
+    : armed(false), throttleIdle(1150) {
     pins[0] = m1;
     pins[1] = m2;
     pins[2] = m3;
@@ -29,11 +29,11 @@ void ESCManager::writeOutputs(int m1_us, int m2_us, int m3_us, int m4_us) {
         return;
     }
 
-    // limitarea harware de 1000 - 2000
-    motors[0].writeMicroseconds(constrain(m1_us, 1000, 2000));
-    motors[1].writeMicroseconds(constrain(m2_us, 1000, 2000));
-    motors[2].writeMicroseconds(constrain(m3_us, 1000, 2000));
-    motors[3].writeMicroseconds(constrain(m4_us, 1000, 2000));
+    // Limitare cu relanti pentru stabilitate in zbor (ThrottleIdle)
+    motors[0].writeMicroseconds(constrain(m1_us, throttleIdle, 2000));
+    motors[1].writeMicroseconds(constrain(m2_us, throttleIdle, 2000));
+    motors[2].writeMicroseconds(constrain(m3_us, throttleIdle, 2000));
+    motors[3].writeMicroseconds(constrain(m4_us, throttleIdle, 2000));
 }
 
 void ESCManager::stopAll() {

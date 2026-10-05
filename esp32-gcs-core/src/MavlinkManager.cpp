@@ -83,15 +83,15 @@ bool MavlinkManager::update(Telemetry& tele, PIDConfig& pidConfig) {
                     
                     std::string param_id(param.param_id, strnlen(param.param_id, 16));
                     
-                    if (param_id == "ROLL_P") pidConfig.rollP = param.param_value;
-                    else if (param_id == "ROLL_I") pidConfig.rollI = param.param_value;
-                    else if (param_id == "ROLL_D") pidConfig.rollD = param.param_value;
-                    else if (param_id == "PITCH_P") pidConfig.pitchP = param.param_value;
-                    else if (param_id == "PITCH_I") pidConfig.pitchI = param.param_value;
-                    else if (param_id == "PITCH_D") pidConfig.pitchD = param.param_value;
-                    else if (param_id == "YAW_P") pidConfig.yawP = param.param_value;
-                    else if (param_id == "YAW_I") pidConfig.yawI = param.param_value;
-                    else if (param_id == "YAW_D") pidConfig.yawD = param.param_value;
+                    if (param_id == "RATE_ROLL_P") pidConfig.rollP = param.param_value;
+                    else if (param_id == "RATE_ROLL_I") pidConfig.rollI = param.param_value;
+                    else if (param_id == "RATE_ROLL_D") pidConfig.rollD = param.param_value;
+                    else if (param_id == "RATE_PITCH_P") pidConfig.pitchP = param.param_value;
+                    else if (param_id == "RATE_PITCH_I") pidConfig.pitchI = param.param_value;
+                    else if (param_id == "RATE_PITCH_D") pidConfig.pitchD = param.param_value;
+                    else if (param_id == "RATE_YAW_P") pidConfig.yawP = param.param_value;
+                    else if (param_id == "RATE_YAW_I") pidConfig.yawI = param.param_value;
+                    else if (param_id == "RATE_YAW_D") pidConfig.yawD = param.param_value;
                     
                     std::cout << "[GCS] PID Param Received: " << param_id << " = " << param.param_value << std::endl;
                     break;

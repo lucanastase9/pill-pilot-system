@@ -8,6 +8,7 @@ private:
     Servo motors[4];
     uint8_t pins[4];
     bool armed;
+    uint16_t throttleIdle;
 
 public:
     ESCManager(uint8_t m1, uint8_t m2, uint8_t m3, uint8_t m4);

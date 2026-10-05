@@ -15,7 +15,9 @@ LoRaManager::LoRaManager(SPIClass& spi_bus, uint8_t cs, uint8_t dio1, uint8_t rs
 
 bool LoRaManager::init() {
     spi.begin();
-    int state = radio->begin(868.0, 500.0, 7, 7, 0x12, 10);
+    // begin(freq, bw, sf, cr, syncWord, power)
+    // CR=5 înseamnă 4/5 în RadioLib. Power=22 dBm.
+    int state = radio->begin(868.0, 500.0, 7, 5, 0x12, 22);
 
     if (state == RADIOLIB_ERR_NONE) {
         radio->setDio1Action(setFlag);

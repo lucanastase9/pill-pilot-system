@@ -486,7 +486,7 @@ void GuiManager::drawKeyGuide() {
 }
 
 // ==== RANDAREA PRINCIPALA SCHIMBATA ====
-void GuiManager::drawPIDTuningCard(PIDConfig& pidConfig, const InputState& input) {
+void GuiManager::drawPIDTuningCard(PIDConfig& pidConfig, const InputState& input, bool isArmed) {
     int pX = 50, pY = 50, pW = 800, pH = 550;
     drawRect(pX, pY, pW, pH, 30, 35, 45, true);
     drawRect(pX, pY, pW, pH, 60, 150, 255, false);
@@ -558,9 +558,16 @@ void GuiManager::drawPIDTuningCard(PIDConfig& pidConfig, const InputState& input
     drawString("REQUEST PIDS (R)", pX + 35, pY + 495, 1, 255, 255, 255);
     
     // Send Button
-    drawRect(pX + 240, pY + 480, 200, 40, 150, 50, 50, true);
-    drawRect(pX + 240, pY + 480, 200, 40, 200, 100, 100, false);
-    drawString("SEND PIDS (ENTER)", pX + 255, pY + 495, 1, 255, 255, 255);
+    if (isArmed) {
+        drawRect(pX + 240, pY + 480, 200, 40, 60, 60, 60, true);
+        drawRect(pX + 240, pY + 480, 200, 40, 140, 80, 80, false);
+        drawString("LOCKED (ARMED)", pX + 265, pY + 495, 1, 255, 100, 100);
+        drawString("DISARM DRONE TO SEND PIDS!", pX + 460, pY + 495, 1, 255, 70, 70);
+    } else {
+        drawRect(pX + 240, pY + 480, 200, 40, 150, 50, 50, true);
+        drawRect(pX + 240, pY + 480, 200, 40, 200, 100, 100, false);
+        drawString("SEND PIDS (ENTER)", pX + 255, pY + 495, 1, 255, 255, 255);
+    }
 }
 
 void GuiManager::render(const Telemetry& tele, bool isConnected, PIDConfig& pidConfig, const InputState& input) {
@@ -574,7 +581,7 @@ void GuiManager::render(const Telemetry& tele, bool isConnected, PIDConfig& pidC
     drawKeyGuide();
 
     if (input.debugMode) {
-        drawPIDTuningCard(pidConfig, input);
+        drawPIDTuningCard(pidConfig, input, tele.isArmed);
     }
 
     SDL_RenderPresent(renderer);
@@ -761,8 +768,8 @@ InputState GuiManager::processEvents(PIDConfig& pidConfig) {
     if (joystick) {
         SDL_JoystickUpdate();
 
-        input.pitch = SDL_JoystickGetAxis(joystick, 0);
-        input.roll  = SDL_JoystickGetAxis(joystick, 1);
+        input.roll  = SDL_JoystickGetAxis(joystick, 0);
+        input.pitch = SDL_JoystickGetAxis(joystick, 1);
 
         input.kill         = SDL_JoystickGetButton(joystick, 0) == 1;
         input.yawLeft      = SDL_JoystickGetButton(joystick, 4) == 1;

@@ -45,7 +45,7 @@ public:
 
     void drawTelemetryCard(const Telemetry& tele, bool isConnected);
     void drawKeyGuide();
-    void drawPIDTuningCard(PIDConfig& pidConfig, const InputState& input);
+    void drawPIDTuningCard(PIDConfig& pidConfig, const InputState& input, bool isArmed);
     
     void render(const Telemetry& tele, bool isConnected, PIDConfig& pidConfig, const InputState& input);
     

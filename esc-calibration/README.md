@@ -1,56 +1,56 @@
-# Ghid Calibrare Interactivă ESC - Pill-Pilot System
+# Utilitar Calibrare, Testare Motoare & Aliniere IMU - Pill-Pilot System
 
-Proiect dedicat pentru calibrarea controllerelor de turație (ESC) pe **STM32 BlackPill F411CE** cu ghidare interactivă și testare individuală a motoarelor prin **Serial Monitor** (115200 baud).
+Proiect dedicat pentru **STM32 BlackPill F411CE** cu interfață Serială interactivă (115200 baud).
 
 ## ⚠️ AVERTISMENT CRITIC DE SIGURANȚĂ
-> **DEMONTEAZĂ TOATE CELE 4 ELICE ÎNAINTE DE A CONECTA BATERIA!**  
-> Nu monta elicele niciodată în timpul procedurilor de calibrare sau testare!
+> **DEMONTEAZĂ TOATE CELE 4 ELICE ÎNAINTE DE TESTARE SAU CALIBRARE!**  
+> Nu monta elicele niciodată în timpul testelor pe banc!
 
 ---
 
-## 1. Conexiuni Motoare (Quad-X)
-Conform `stm32-uav-core`:
-- **Motor 1** -> **`PA0`** (Față - Dreapta)
-- **Motor 2** -> **`PA1`** (Spate - Dreapta)
-- **Motor 3** -> **`PA2`** (Spate - Stânga)
-- **Motor 4** -> **`PA3`** (Față - Stânga)
+## 1. Conexiuni Motoare & Direcții de Rotație (Quad-X)
+Conform `MotorMixer.hpp`:
+- **Motor 1** -> **`PA0`** (Față - Dreapta) | **CCW ↺** (sens antiorar)
+- **Motor 2** -> **`PA1`** (Spate - Dreapta) | **CW ↻** (sens orar)
+- **Motor 3** -> **`PA2`** (Spate - Stânga)  | **CCW ↺** (sens antiorar)
+- **Motor 4** -> **`PA3`** (Față - Stânga)   | **CW ↻** (sens orar)
 
 ---
 
-## 2. Ce înseamnă sunetele ESC-ului?
-1. La conectarea bateriei (când semnalul este la **2000 µs**):
-   - Melodia inițială.
-   - **2 bipuri scurte** (`bip-bip`) = ESC-ul a înregistrat limita maximă (2000 µs).
-2. Când apeși Enter și semnalul coboară la **1000 µs**:
-   - ESC-ul emite **sunetul clasic de pornire/armare** (melodie scurtă + bip lung) = ESC-ul a salvat limita minimă, s-a ARMAT și este gata de rotire! În acest moment motoarele stau nemișcate la 1000 µs.
+## 2. Conexiuni Senzor IMU (BMI160 pe SPI1)
+- **CS** ➔ Pin **`PA4`**
+- **SCK** ➔ Pin **`PA5`**
+- **MISO** ➔ Pin **`PA6`**
+- **MOSI** ➔ Pin **`PA7`**
+- **Aliniere fizică**: Axa $X$ orientată spre **M3** (Spate-Stânga), axa $Y$ spre **M2** (Spate-Dreapta), cipul în **SUS**.
 
 ---
 
-## 3. Comenzi Testare în Serial Monitor (după calibrare)
-După ce calibrarea s-a finalizat, poți trimite direct în consolă:
-- **`1` + Enter**: Rotește doar **Motorul 1** (`PA0` - Față-Dreapta) timp de 2 secunde.
-- **`2` + Enter**: Rotește doar **Motorul 2** (`PA1` - Spate-Dreapta) timp de 2 secunde.
-- **`3` + Enter**: Rotește doar **Motorul 3** (`PA2` - Spate-Stânga) timp de 2 secunde.
-- **`4` + Enter**: Rotește doar **Motorul 4** (`PA3` - Față-Stânga) timp de 2 secunde.
-- **`a` + Enter**: Rotește **toate cele 4 motoare** simultan timp de 2 secunde.
-- **`s` + Enter**: Comandă STOP de urgență (toate la 1000 µs).
+## 3. Meniul Principal la Boot (Serial 115200 baud)
 
-## 4.Diagramă de Orientare a Dronei
-                  FAȚĂ (FRONT)
-                       ▲
-                       │
-       (M4) ───────────┴─────────── (M1)
-    [Față-Stânga]               [Față-Dreapta]
-       Pin: PA3                    Pin: PA0
-               \               /
-                \             /
-                 \   STM32   /
-                  \ F411CE  /
-                 /           \
-                /             \
-               /               \
-       Pin: PA2                    Pin: PA1
-    [Spate-Stânga]              [Spate-Dreapta]
-       (M3) ─────────────────────── (M2)
-                       │
-                  SPATE (REAR)
+### Tasta `1` ➔ Modul de Test Motoare
+Pentru verificarea rotației și a sensului fiecărui motor (ESC-urile alimentate normal la 1000 µs):
+- **`1` + Enter**: Rotește **Motorul 1** (`PA0` - Față-Dreapta) timp de 2 secunde.
+- **`2` + Enter**: Rotește **Motorul 2** (`PA1` - Spate-Dreapta) timp de 2 secunde.
+- **`3` + Enter**: Rotește **Motorul 3** (`PA2` - Spate-Stânga) timp de 2 secunde.
+- **`4` + Enter**: Rotește **Motorul 4** (`PA3` - Față-Stânga) timp de 2 secunde.
+- **`a` + Enter**: Rotește **toate cele 4 motoare** simultan.
+- **`s` + Enter**: Comandă **STOP** de urgență.
+- **`m` + Enter**: Înapoi la Meniul Principal.
+
+### Tasta `2` ➔ Modul de Calibrare ESC
+Procedura pas cu pas de calibrare a plajei de turație:
+1. Bateria deconectată ➔ Apasă Enter ➔ Semnal MAX (2000 µs).
+2. Conectează bateria ➔ Ascultă cele 2 bipuri scurte ➔ Apasă Enter.
+3. Semnal MIN (1000 µs) ➔ ESC-urile confirmă minimul și se armează.
+4. Trece automat în Modul de Test Motoare.
+
+### Tasta `3` ➔ Modul de Test Aliniere IMU (135°)
+Pentru vizualizarea în timp real a unghiurilor fără a porni motoarele:
+1. Drona stă pe birou orizontală ➔ Calibrează automat offset-ul de zero.
+2. Afișează continuu în consolă:
+   `[DRONA 135°] Roll: +0.2° | Pitch: -0.1° | Gyro(X,Y): (0.0, 0.0) dps`
+3. **Validare practică**:
+   - Ridică botul dronei în sus ➔ **PITCH** trebuie să crească spre valori pozitive (+), iar Roll să rămână ~0.
+   - Înclină drona spre dreapta ➔ **ROLL** trebuie să crească spre valori pozitive (+), iar Pitch să rămână ~0.
+4. Trimite **`m` + Enter** pentru a opri testul și a reveni la Meniul Principal.

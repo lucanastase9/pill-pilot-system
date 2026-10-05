@@ -18,6 +18,26 @@ void IMUManager::setGyroLPF(float cutoff_hz) {
 
 
 bool IMUManager::init() {
+    pinMode(csPin, OUTPUT);
+    digitalWrite(csPin, HIGH);
+    delay(10);
+
+    // Protocolul BMI160: Senzorul porneste implicit in mod I2C la alimentare!
+    // Pentru a forta comutarea in SPI, CSB trebuie coborat, trimis un dummy read si ridicat inapoi la HIGH:
+    SPI.begin();
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE3));
+    digitalWrite(csPin, LOW);
+    delay(2);
+    SPI.transfer(0x80); // Read register 0x00 (CHIP_ID)
+    uint8_t raw_id = SPI.transfer(0x00);
+    digitalWrite(csPin, HIGH);
+    SPI.endTransaction();
+
+    Serial.print("[IMU DEBUG] Raw SPI Chip ID: 0x");
+    Serial.println(raw_id, HEX);
+
+    delay(10);
+
     if (BMI160.begin(BMI160GenClass::SPI_MODE, csPin)) {
         // Configurăm filtrul Hardware DLPF în modul NORMAL
         // Aceasta elimină zgomotul de foarte înaltă frecvență direct pe cip
@@ -28,6 +48,8 @@ bool IMUManager::init() {
         return true;
     }
 
+    Serial.print("[IMU DEBUG] Chip ID citit de librarie: 0x");
+    Serial.println(BMI160.getDeviceID(), HEX);
     return false;
 }
 
@@ -112,21 +134,35 @@ void IMUManager::update(float dt) {
     float ay_f = (float)ay - accelOffsetY;
     float az_f = (float)az - accelOffsetZ;
 
-    // 3. CALCULĂM VITEZELE UNGHIULARE (Folosim gx_f si gy_f corectate!)
-    float rawGyroX = gx_f / 131.0f;
-    float rawGyroY = gy_f / 131.0f;
-    float rawGyroZ = gz_f / 131.0f;
+    // 3. APLICĂM TRANSFORMAREA DE 135 GRADE PENTRU ORIENTAREA SENZORULUI
+    const float C = 0.70710678f; // sqrt(2)/2
+    
+    float ax_drone = -C * (ax_f + ay_f);
+    float ay_drone =  C * (ay_f - ax_f);
+    float az_drone =  az_f;
+
+    float gx_drone = -C * (gx_f + gy_f);
+    float gy_drone =  C * (gy_f - gx_f);
+    float gz_drone =  gz_f;
+
+    // 4. CALCULĂM VITEZELE UNGHIULARE (Folosim gx_drone, gy_drone, gz_drone)
+    float rawGyroX = gx_drone / 131.0f;
+    float rawGyroY = gy_drone / 131.0f;
+    float rawGyroZ = gz_drone / 131.0f;
 
     // APLICĂM FILTRUL SOFTWARE PT1
     gyroRateX = gyroFilterX.apply(rawGyroX, dt);
     gyroRateY = gyroFilterY.apply(rawGyroY, dt);
     gyroRateZ = gyroFilterZ.apply(rawGyroZ, dt);
 
-    // 4. CALCULĂM UNGHIURILE DIN ACCELEROMETRU (Folosim ax_f, ay_f, az_f corectate!)
-    float accRoll = atan2(ay_f, az_f) * 57.2957795f;
-    float accPitch = atan2(-ax_f, sqrt(ay_f * ay_f + az_f * az_f)) * 57.2957795f;
+    // 5. CALCULĂM UNGHIURILE DIN ACCELEROMETRU (Folosim ax_drone, ay_drone, az_drone)
+    float accRoll = atan2(ay_drone, az_drone) * 57.2957795f;
+    float accPitch = atan2(-ax_drone, sqrt(ay_drone * ay_drone + az_drone * az_drone)) * 57.2957795f;
 
-    // 5. FILTRUL COMPLEMENTAR (Pitch și Roll curate)
-    roll  = 0.98f * (roll + gyroRateX * dt) + 0.02f * accRoll;
-    pitch = 0.98f * (pitch + gyroRateY * dt) + 0.02f * accPitch;
+    // 6. FILTRUL COMPLEMENTAR DINAMIC (Pitch și Roll curate)
+    const float tau = 0.5f; // Constanta de timp (0.5 secunde)
+    float alpha = tau / (tau + dt);
+    
+    roll  = alpha * (roll + gyroRateX * dt) + (1.0f - alpha) * accRoll;
+    pitch = alpha * (pitch + gyroRateY * dt) + (1.0f - alpha) * accPitch;
 }

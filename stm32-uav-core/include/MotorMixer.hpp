@@ -13,11 +13,13 @@ public:
     static MotorOutput mixQuadX(int throttle, float rollCorr, float pitchCorr, float yawCorr) {
         MotorOutput out;
 
-        // Geometria standard Quad-X
-        out.m1 = throttle - (int)pitchCorr - (int)rollCorr - (int)yawCorr;
-        out.m2 = throttle + (int)pitchCorr - (int)rollCorr + (int)yawCorr;
-        out.m3 = throttle + (int)pitchCorr + (int)rollCorr - (int)yawCorr;
-        out.m4 = throttle - (int)pitchCorr + (int)rollCorr + (int)yawCorr;
+        // Geometria standard Quad-X:
+        // Când botul cade în față (pitch < 0), pitchCorr devine pozitiv.
+        // Motoarele din față (m1, m4) trebuie să crească (+), iar cele din spate (m2, m3) să scadă (-).
+        out.m1 = throttle + (int)pitchCorr - (int)rollCorr - (int)yawCorr;
+        out.m2 = throttle - (int)pitchCorr - (int)rollCorr + (int)yawCorr;
+        out.m3 = throttle - (int)pitchCorr + (int)rollCorr - (int)yawCorr;
+        out.m4 = throttle + (int)pitchCorr + (int)rollCorr + (int)yawCorr;
 
         return out;
     }

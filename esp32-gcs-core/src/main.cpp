@@ -7,6 +7,9 @@
 #include "MavlinkManager.hpp"
 #include "GuiManager.hpp"
 #include "PIDConfig.hpp"
+#include <vector>
+#include <string>
+#include <utility>
 
 int main(int argc, char* argv[]) {
     std::cout << "=== DRONE GROUND STATION START ===" << std::endl;
@@ -53,6 +56,8 @@ int main(int argc, char* argv[]) {
 
     // -------- MASCA PENTRU MEMORAREA BUTOANELOR (LATCHING) --------
     uint16_t latchedButtonsMask = 0;
+    bool pendingRequestPids = false;
+    std::vector<std::pair<std::string, float>> pidSendQueue;
 
     while (running) {
         InputState input = gui.processEvents(pidConfig);
@@ -125,45 +130,77 @@ int main(int argc, char* argv[]) {
         if (calibJustPressed) {
             latchedButtonsMask |= (1 << 2);
         }
-        
-        // =========================================================
-        // 3.5. PROCESARE CERERI PID
-        // =========================================================
+
         if (input.requestPids) {
-            mavlink.sendParamRequestList();
+            pendingRequestPids = true;
+        }
+
+        if (input.sendPids) {
+            if (tele.isArmed) {
+                std::cout << "\n[BLOCAT] SIGURANTA: Drona este ARMATA! Nu se pot modifica parametrii PID in zbor." << std::endl;
+                std::cout << "[BLOCAT] Dezarmeaza drona pentru a putea trimite noii parametri.\n" << std::endl;
+            } else {
+                pidSendQueue.clear();
+                pidSendQueue.push_back({"RATE_ROLL_P", pidConfig.rollP});
+                pidSendQueue.push_back({"RATE_ROLL_I", pidConfig.rollI});
+                pidSendQueue.push_back({"RATE_ROLL_D", pidConfig.rollD});
+                pidSendQueue.push_back({"RATE_PITCH_P", pidConfig.pitchP});
+                pidSendQueue.push_back({"RATE_PITCH_I", pidConfig.pitchI});
+                pidSendQueue.push_back({"RATE_PITCH_D", pidConfig.pitchD});
+                pidSendQueue.push_back({"RATE_YAW_P", pidConfig.yawP});
+                pidSendQueue.push_back({"RATE_YAW_I", pidConfig.yawI});
+                pidSendQueue.push_back({"RATE_YAW_D", pidConfig.yawD});
+                std::cout << "[GCS] PID-urile au fost adaugate in coada de transmisie (" << pidSendQueue.size() << " parametri)." << std::endl;
+            }
+        }
+
+        // Daca drona s-a armat intre timp, curatam orice comanda pendinte de PID
+        if (tele.isArmed && !pidSendQueue.empty()) {
+            pidSendQueue.clear();
+            std::cout << "[GCS] Coada de transmitere PID a fost anulata automat deoarece drona s-a armat!" << std::endl;
         }
         
-        if (input.sendPids) {
-            mavlink.sendParamSet("ROLL_P", pidConfig.rollP);
-            mavlink.sendParamSet("ROLL_I", pidConfig.rollI);
-            mavlink.sendParamSet("ROLL_D", pidConfig.rollD);
-            mavlink.sendParamSet("PITCH_P", pidConfig.pitchP);
-            mavlink.sendParamSet("PITCH_I", pidConfig.pitchI);
-            mavlink.sendParamSet("PITCH_D", pidConfig.pitchD);
-            mavlink.sendParamSet("YAW_P", pidConfig.yawP);
-            mavlink.sendParamSet("YAW_I", pidConfig.yawI);
-            mavlink.sendParamSet("YAW_D", pidConfig.yawD);
-        }
-
         // =========================================================
-        // 4. TRANSMISIE STRICTĂ (1 SINGUR PACHET / SECUNDĂ)
+        // 3.5 & 4. MASTER POLLING (GCS TRIMITE COMENZI LA INTERVAL FIX)
         // =========================================================
-        if (elapsedTime >= HEARTBEAT_INTERVAL_MS) {
-
-            if (waitingForTelemetry) {
-                std::cout << "[AVERTISMENT] Timeout! Pachet pierdut pe LoRa în ultima secundă." << std::endl;
+        if (elapsedTime >= 200) { // Polling la fiecare 200ms
+            // Trimitem comanda de control ca pachet "master"
+            mavlink.sendManualControl(pitchOut, rollOut, currentThrottle, currentYaw, latchedButtonsMask);
+            
+            // Resetăm butoanele apăsate
+            latchedButtonsMask = 0;
+            
+            // Trimitem cerere de parametri dacă s-a solicitat (doar daca drona este dezarmata)
+            if (pendingRequestPids) {
+                if (!tele.isArmed) {
+                    mavlink.sendParamRequestList();
+                } else {
+                    std::cout << "[GCS] Ignorat REQUEST PIDS: drona este armata!" << std::endl;
+                }
+                pendingRequestPids = false;
             }
 
-            // Trimitem pachetul folosind masca memoriată pe parcursul secundei
-            mavlink.sendManualControl(pitchOut, rollOut, currentThrottle, currentYaw, latchedButtonsMask);
-            std::cout << "[GCS TX] -> Comandă trimisă. Butoane salvate: " << latchedButtonsMask << ". Trec în modul ASCULTARE..." << std::endl;
-
-            // CRITIC: Resetăm masca de butoane DUPĂ ce am trimis-o!
-            // Altfel, am trimite comanda de calibrare sau armare la infinit.
-            latchedButtonsMask = 0;
-
+            // Trimitem maxim 2 parametri pe ciclu DOAR daca drona este DEZARMATA
+            int sentCount = 0;
+            while (!tele.isArmed && !pidSendQueue.empty() && sentCount < 2) {
+                auto& p = pidSendQueue.front();
+                mavlink.sendParamSet(p.first.c_str(), p.second);
+                pidSendQueue.erase(pidSendQueue.begin());
+                sentCount++;
+            }
+            
             waitingForTelemetry = true;
             lastSendTime = currentTime;
+        }
+
+        // =========================================================
+        // 5. VERIFICARE TIMEOUT
+        // =========================================================
+        if (elapsedTime >= 1000) {
+            if (waitingForTelemetry) {
+                std::cout << "[AVERTISMENT] Conexiune pierdută! Drona nu a răspuns la polling." << std::endl;
+                waitingForTelemetry = false;
+            }
         }
 
         prevInput = input;
