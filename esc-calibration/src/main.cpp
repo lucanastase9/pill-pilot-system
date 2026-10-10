@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <Servo.h>
 #include <SPI.h>
-#include <BMI160Gen.h>
+#include "IMUManager.hpp"
 
 // ============================================================================
 // CONFIGURARE PINI SI CONSTANTE
@@ -29,10 +29,14 @@ const char* MOTOR_NAMES[4] = {
 #define PWM_MAX 2000
 #define PWM_MIN 1000
 
-// Turație sigură de test pe banc (fără elice montate)
+// Turație fixă pentru modul de testare individuală
 #define PWM_TEST 1120 
 
+// Turație maximă permisă în testul combinat IMU + Motoare
+#define PWM_IMU_TEST_MAX 1500
+
 Servo escMotors[4];
+IMUManager imu(IMU_CS_PIN);
 
 // Stările posibile ale programului
 enum ProgramMode {
@@ -43,21 +47,12 @@ enum ProgramMode {
 
 ProgramMode currentMode = MODE_SELECT_MENU;
 
-// Variabile de stare pentru IMU BMI160
-bool imuInitialized = false;
-float accelOffsetX = 0.0f;
-float accelOffsetY = 0.0f;
-float accelOffsetZ = 0.0f;
-float gyroOffsetX = 0.0f;
-float gyroOffsetY = 0.0f;
-float gyroOffsetZ = 0.0f;
-
-const float EXPECTED_1G = 16384.0f; // 1G la sensibilitate +/- 2G
-
 // ============================================================================
 // FUNCTII HELPER PENTRU MOTOARE SI SERIAL
 // ============================================================================
 void setAllMotors(int pulse_us) {
+    if (pulse_us < PWM_MIN) pulse_us = PWM_MIN;
+    if (pulse_us > PWM_MAX) pulse_us = PWM_MAX;
     for (int i = 0; i < 4; i++) {
         escMotors[i].writeMicroseconds(pulse_us);
     }
@@ -88,6 +83,42 @@ void waitForSerialInput() {
     flushSerial();
 }
 
+// Afiseaza un grafic tip bara orizontala cu axa de zero (|) in centru (pozitia pe masa)
+void printBarGraph(const char* label, float angle, float maxAngle = 20.0f) {
+    const int HALF_WIDTH = 15; // 15 caractere spre stanga (-), 15 spre dreapta (+)
+    char bar[HALF_WIDTH * 2 + 2];
+    
+    // Umplem bara cu spatii/puncte
+    for (int i = 0; i < HALF_WIDTH * 2 + 1; i++) {
+        bar[i] = '.';
+    }
+    bar[HALF_WIDTH * 2 + 1] = '\0';
+    bar[HALF_WIDTH] = '|'; // Axa X: Punctul de 0.0° (reperul mesei)
+
+    float clamped = angle;
+    if (clamped < -maxAngle) clamped = -maxAngle;
+    if (clamped > maxAngle) clamped = maxAngle;
+
+    int offset = (int)round((clamped / maxAngle) * HALF_WIDTH);
+    if (offset > 0) {
+        for (int i = 1; i <= offset && (HALF_WIDTH + i) <= HALF_WIDTH * 2; i++) {
+            bar[HALF_WIDTH + i] = '#';
+        }
+    } else if (offset < 0) {
+        for (int i = -1; i >= offset && (HALF_WIDTH + i) >= 0; i--) {
+            bar[HALF_WIDTH + i] = '#';
+        }
+    }
+
+    Serial.print(label);
+    Serial.print(" [-20° ");
+    Serial.print(bar);
+    Serial.print(" +20°] ");
+    if (angle >= 0.0f) Serial.print("+");
+    Serial.print(angle, 1);
+    Serial.println("°");
+}
+
 // ============================================================================
 // AFISARE MENIURI
 // ============================================================================
@@ -102,8 +133,8 @@ void printMainMenu() {
     Serial.println("         (daca ESC-urile sunt deja calibrate si bateria e cuplata)");
     Serial.println("  [2] -> MODUL DE CALIBRARE ESC");
     Serial.println("         (procedura de calibrare max 2000us / min 1000us)");
-    Serial.println("  [3] -> MODUL DE TEST ALINIERE IMU (135 GRADE)");
-    Serial.println("         (afisare in timp real Roll/Pitch cu transformarea aplicata)");
+    Serial.println("  [3] -> MODUL TEST IMU (GRAFICE KALMAN ROLL & PITCH)");
+    Serial.println("         (grafice vizuale cu axa 0 pe masa + turatie motoare 1000-1500us)");
     Serial.println("--------------------------------------------------------");
     Serial.println(">>> Trimite '1', '2' sau '3' in Serial...");
 }
@@ -168,175 +199,158 @@ void executeCalibration() {
 }
 
 // ============================================================================
-// PROCEDURA TEST IMU CU TRANSFORMARE 135 GRADE (OPTIONALUL 3)
+// MODUL 3: TEST IMU (GRAFICE KALMAN ROLL & PITCH CU AXA 0 PE MASA)
 // ============================================================================
-bool initAndCalibrateIMU() {
-    if (!imuInitialized) {
-        Serial.println("\n[IMU] Conectare la BMI160 pe pinul PA4 (SPI)...");
-        pinMode(IMU_CS_PIN, OUTPUT);
-        digitalWrite(IMU_CS_PIN, HIGH);
-        delay(10);
-        
-        // Configurare explicita a pinilor SPI1 (pentru STM32F411 BlackPill)
-        SPI.setSCLK(PA5);
-        SPI.setMISO(PA6);
-        SPI.setMOSI(PA7);
-
-        // RAW SPI TEST to see what's failing
-        SPI.begin();
-        SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE3));
-        digitalWrite(IMU_CS_PIN, LOW);
-        delay(1);
-        SPI.transfer(0x80); // Read register 0x00 (CHIP_ID)
-        uint8_t raw_id = SPI.transfer(0x00);
-        digitalWrite(IMU_CS_PIN, HIGH);
-        SPI.endTransaction();
-
-        Serial.print("[DEBUG] RAW CHIP ID: 0x");
-        Serial.println(raw_id, HEX);
-        delay(2000); // Pauza ca utilizatorul sa vada mesajul
-
-        if (!BMI160.begin(BMI160GenClass::SPI_MODE, IMU_CS_PIN)) {
-            Serial.print("[EROARE] Nu am putut initializa BMI160 pe SPI! CHIP ID raportat de librarie: 0x");
-            Serial.println(BMI160.getDeviceID(), HEX);
-            Serial.println("  -> Verifica daca senzorul este alimentat (LED-ul modulului aprins/tensiune VCC).");
-            Serial.println("  -> Daca senzorul este alimentat din bateria dronei (BEC 5V), conecteaza bateria!");
-            Serial.println("  -> Verifica cablajul SPI: CS=PA4, SCK=PA5, MISO=PA6, MOSI=PA7.");
-            delay(4000); // Pauza lunga sa ramana mesajul pe ecran
-            return false;
-        }
-        BMI160.setGyroDLPFMode(BMI160_DLPF_MODE_NORM);
-        BMI160.setAccelDLPFMode(BMI160_DLPF_MODE_NORM);
-        imuInitialized = true;
-        Serial.println("[OK] BMI160 initializat cu succes!");
-        delay(1000);
-    }
-
-    Serial.println("[IMU] Aseaza drona pe o suprafata orizontala si NU o misca!");
-    Serial.println("[IMU] Calibrez offset-urile de zero (aprox 2 secunde)...");
-    delay(1000);
-
-    long sumAX = 0, sumAY = 0, sumAZ = 0;
-    long sumGX = 0, sumGY = 0, sumGZ = 0;
-    const int samples = 500;
-
-    for (int i = 0; i < samples; i++) {
-        int gx, gy, gz, ax, ay, az;
-        BMI160.readGyro(gx, gy, gz);
-        BMI160.readAccelerometer(ax, ay, az);
-
-        sumGX += gx; sumGY += gy; sumGZ += gz;
-        sumAX += ax; sumAY += ay; sumAZ += az;
-        delay(3);
-    }
-
-    gyroOffsetX = (float)sumGX / samples;
-    gyroOffsetY = (float)sumGY / samples;
-    gyroOffsetZ = (float)sumGZ / samples;
-
-    accelOffsetX = (float)sumAX / samples;
-    accelOffsetY = (float)sumAY / samples;
-    accelOffsetZ = ((float)sumAZ / samples) - EXPECTED_1G;
-
-    Serial.println("[IMU] Calibrare offset reusita!");
-    return true;
-}
-
 void runIMUTestLoop() {
-    setAllMotors(PWM_MIN); // Siguranta: motoare oprite
+    setAllMotors(PWM_MIN); // Siguranta: motoarele oprite la intrare
 
-    if (!initAndCalibrateIMU()) {
-        currentMode = MODE_SELECT_MENU;
-        printMainMenu();
-        return;
+    // Initializare IMU daca nu a fost initializat
+    if (!imu.isInitialized()) {
+        Serial.println("\n[IMU] Initializare senzor BMI160 pe SPI...");
+        if (!imu.init()) {
+            Serial.println("[EROARE] Senzorul BMI160 nu a putut fi initializat!");
+            currentMode = MODE_SELECT_MENU;
+            printMainMenu();
+            return;
+        }
+        Serial.println("[OK] Senzor BMI160 initializat pe SPI!");
     }
 
     Serial.println("\n========================================================");
-    Serial.println("      MODUL 3: MONITORIZARE IN TIMP REAL IMU (135°)     ");
+    Serial.println(" MODUL 3: GRAFICE ROLL & PITCH (KALMAN) & TEST MOTOARE  ");
     Serial.println("========================================================");
-    Serial.println("Cum verifici alinierea:");
-    Serial.println("  1. Ridica BOTUL dronei in sus     --> PITCH creste cu PLUS (+)");
-    Serial.println("  2. Inclina drona spre DREAPTA     --> ROLL creste cu PLUS (+)");
-    Serial.println("  * Observa: cand misti doar botul, ROLL-ul ar trebui sa ramana ~0!");
+    Serial.println("[ATENTIE] ASIGURA-TE CA ELICELE SUNT DEMONTATE!");
     Serial.println("--------------------------------------------------------");
-    Serial.println(">>> Trimite 'm' (sau orice tasta) pentru revenire la MENIU.");
-    Serial.println("========================================================\n");
+    Serial.println("REPERE GRAFICE:");
+    Serial.println("  '|' reprezinta 0.0° (axa de referinta pe masa)");
+    Serial.println("  '#' reprezinta abaterea unghiului (la stanga sau la dreapta)");
+    Serial.println("--------------------------------------------------------");
+    Serial.println("COMENZI DISPONIBILE DIN SERIAL:");
+    Serial.println("  [e] / [d]   : Pas FIN de +/-1us (ex: 1001, 1002... prag pornire)");
+    Serial.println("  [w] / [s]   : Pas MARE de +/-25us (sau [+] / [-])");
+    Serial.println("  [x] sau [SPACE]: STOP URGENT motoare (revine la 1000us)");
+    Serial.println("  [c]         : Calibreaza offset-ul IMU la orizontala (0.0°)");
+    Serial.println("  [r] / [f]   : Mareste / Micsoreaza parametrul Kalman R (+/-0.001)");
+    Serial.println("  [p]         : Comuta intre Mod Grafic ASCII si Mod Serial Plotter");
+    Serial.println("  [m]         : STOP motoare si IESIRE la meniul principal");
+    Serial.println("--------------------------------------------------------");
+    Serial.println("Pornim cu motoarele OPRITE (1000us). Trimite comenzi oricand:\n");
 
-    float rollEstimate = 0.0f;
-    float pitchEstimate = 0.0f;
+    int currentThrottle = PWM_MIN;
+    bool plotterMode = false;
     unsigned long lastTimeMicros = micros();
     unsigned long lastPrintMillis = 0;
 
-    const float C = 0.70710678f; // sqrt(2)/2 pentru rotirea la 135 grade
-
-    while (!Serial.available()) {
+    while (true) {
+        // 1. Calcul dt si update IMU
         unsigned long nowMicros = micros();
         float dt = (nowMicros - lastTimeMicros) / 1000000.0f;
-        if (dt <= 0.0f || dt > 0.1f) dt = 0.01f;
+        if (dt <= 0.0f || dt > 0.05f) dt = 0.004f;
         lastTimeMicros = nowMicros;
 
-        int raw_gx, raw_gy, raw_gz;
-        int raw_ax, raw_ay, raw_az;
+        imu.update(dt);
 
-        BMI160.readGyro(raw_gx, raw_gy, raw_gz);
-        BMI160.readAccelerometer(raw_ax, raw_ay, raw_az);
+        // 2. Procesare comenzi Serial non-blocking
+        if (Serial.available()) {
+            char cmd = Serial.read();
 
-        // 1. Scadem offset-urile de calibrare
-        float gx_f = (float)raw_gx - gyroOffsetX;
-        float gy_f = (float)raw_gy - gyroOffsetY;
-        float gz_f = (float)raw_gz - gyroOffsetZ;
-
-        float ax_f = (float)raw_ax - accelOffsetX;
-        float ay_f = (float)raw_ay - accelOffsetY;
-        float az_f = (float)raw_az - accelOffsetZ;
-
-        // 2. APLICAM TRANSFORMAREA DE 135 GRADE CATRE COORDONATELE DRONEI
-        // X senzor spre M3, Y senzor spre M2, Z in sus
-        float ax_drone = -C * (ax_f + ay_f);
-        float ay_drone =  C * (ay_f - ax_f);
-        float az_drone =  az_f;
-
-        float gx_drone = -C * (gx_f + gy_f);
-        float gy_drone =  C * (gy_f - gx_f);
-        float gz_drone =  gz_f;
-
-        // 3. Calculam vitezele unghiulare in grade/secunda (131 LSB/(deg/s))
-        float gyroRateX = gx_drone / 131.0f;
-        float gyroRateY = gy_drone / 131.0f;
-        float gyroRateZ = gz_drone / 131.0f;
-
-        // 4. Calculam unghiurile din accelerometru
-        float accRoll  = atan2(ay_drone, az_drone) * 57.2957795f;
-        float accPitch = atan2(-ax_drone, sqrt(ay_drone * ay_drone + az_drone * az_drone)) * 57.2957795f;
-
-        // 5. Filtru complementar
-        rollEstimate  = 0.98f * (rollEstimate  + gyroRateX * dt) + 0.02f * accRoll;
-        pitchEstimate = 0.98f * (pitchEstimate + gyroRateY * dt) + 0.02f * accPitch;
-
-        // 6. Afisare la fiecare 150 ms
-        if (millis() - lastPrintMillis >= 150) {
-            lastPrintMillis = millis();
-
-            Serial.print("[DRONA 135°] Roll: ");
-            if (rollEstimate >= 0.0f) Serial.print("+");
-            Serial.print(rollEstimate, 1);
-            Serial.print("°  |  Pitch: ");
-            if (pitchEstimate >= 0.0f) Serial.print("+");
-            Serial.print(pitchEstimate, 1);
-            Serial.print("°  |  Gyro(X,Y): (");
-            Serial.print(gyroRateX, 1);
-            Serial.print(", ");
-            Serial.print(gyroRateY, 1);
-            Serial.println(") dps");
-
-            digitalWrite(LED_PIN, (millis() / 250) % 2 == 0 ? LED_ON : LED_OFF);
+            if (cmd == 'e' || cmd == 'E') {
+                currentThrottle += 1;
+                if (currentThrottle > PWM_IMU_TEST_MAX) currentThrottle = PWM_IMU_TEST_MAX;
+                setAllMotors(currentThrottle);
+                Serial.print(">>> [PWM +1us] -> "); Serial.print(currentThrottle); Serial.println("us");
+            } else if (cmd == 'd' || cmd == 'D') {
+                currentThrottle -= 1;
+                if (currentThrottle < PWM_MIN) currentThrottle = PWM_MIN;
+                setAllMotors(currentThrottle);
+                Serial.print(">>> [PWM -1us] -> "); Serial.print(currentThrottle); Serial.println("us");
+            } else if (cmd == 'w' || cmd == 'W' || cmd == '+') {
+                currentThrottle += 25;
+                if (currentThrottle > PWM_IMU_TEST_MAX) currentThrottle = PWM_IMU_TEST_MAX;
+                setAllMotors(currentThrottle);
+                Serial.print(">>> [PWM +25us] -> "); Serial.print(currentThrottle); Serial.println("us");
+            } else if (cmd == 's' || cmd == 'S' || cmd == '-') {
+                currentThrottle -= 25;
+                if (currentThrottle < PWM_MIN) currentThrottle = PWM_MIN;
+                setAllMotors(currentThrottle);
+                Serial.print(">>> [PWM -25us] -> "); Serial.print(currentThrottle); Serial.println("us");
+            } else if (cmd == 'x' || cmd == 'X' || cmd == ' ') {
+                currentThrottle = PWM_MIN;
+                setAllMotors(PWM_MIN);
+                Serial.println("\n>>> [STOP URGENT] Motoare oprite (1000us)!\n");
+            } else if (cmd == 'c' || cmd == 'C') {
+                if (currentThrottle > PWM_MIN) {
+                    Serial.println("\n[AVERTISMENT] Opreste mai intai motoarele (la 1000us) pentru a calibra!");
+                } else {
+                    Serial.println("\n[IMU] Calibrare la orizontala in curs...");
+                    imu.calibrate();
+                    lastTimeMicros = micros();
+                }
+            } else if (cmd == 'r' || cmd == 'R') {
+                float newR = imu.getKalmanR() + 0.001f;
+                imu.setKalmanR(newR);
+                Serial.print("\n[KALMAN] R marit la: ");
+                Serial.println(newR, 3);
+            } else if (cmd == 'f' || cmd == 'F') {
+                float newR = imu.getKalmanR() - 0.001f;
+                if (newR < 0.001f) newR = 0.001f;
+                imu.setKalmanR(newR);
+                Serial.print("\n[KALMAN] R micsorat la: ");
+                Serial.println(newR, 3);
+            } else if (cmd == 'p' || cmd == 'P') {
+                plotterMode = !plotterMode;
+                if (plotterMode) {
+                    Serial.println("\n>>> Activat MOD SERIAL PLOTTER (Format: Roll, Pitch, Zero, Throttle)");
+                } else {
+                    Serial.println("\n>>> Activat MOD GRAFIC BARA ASCII (Pentru Serial Monitor)");
+                }
+            } else if (cmd == 'm' || cmd == 'M') {
+                currentThrottle = PWM_MIN;
+                setAllMotors(PWM_MIN);
+                Serial.println("\n>>> Oprit Modul 3. Revenire la MENIUL PRINCIPAL...");
+                break;
+            }
         }
 
-        delay(10);
+        // 3. Afisare la fiecare 120 ms
+        if (millis() - lastPrintMillis >= 120) {
+            lastPrintMillis = millis();
+
+            if (plotterMode) {
+                // Format compatibil cu Arduino IDE / VSCode Serial Plotter:
+                // Traseaza curbele Roll, Pitch, linia de 0 (Zero) si nivelul de turatie scalat
+                Serial.print("Roll:");
+                Serial.print(imu.getRoll(), 2);
+                Serial.print(",Pitch:");
+                Serial.print(imu.getPitch(), 2);
+                Serial.print(",Zero:0.00");
+                Serial.print(",PWM_Scaled:");
+                Serial.println((currentThrottle - 1000) / 25.0f); // 0 la 1000us, 20 la 1500us
+            } else {
+                // Formatul grafic vizual cu axa 0 in mijloc
+                Serial.print("[PWM: ");
+                Serial.print(currentThrottle);
+                Serial.print("us] | Gyro(X,Y): (");
+                Serial.print(imu.getGyroX(), 1);
+                Serial.print(", ");
+                Serial.print(imu.getGyroY(), 1);
+                Serial.print(") dps | Kalman R: ");
+                Serial.println(imu.getKalmanR(), 3);
+
+                printBarGraph("ROLL  ", imu.getRoll(), 20.0f);
+                printBarGraph("PITCH ", imu.getPitch(), 20.0f);
+                Serial.println(); // Linie goala pentru claritate vizuala
+            }
+
+            digitalWrite(LED_PIN, (currentThrottle > PWM_MIN) ? LED_ON : ((millis() / 300) % 2 == 0 ? LED_ON : LED_OFF));
+        }
+
+        delay(4); // Permite o bucla de aproximativ 250 Hz
     }
 
+    setAllMotors(PWM_MIN);
+    digitalWrite(LED_PIN, LED_OFF);
     flushSerial();
-    Serial.println("\n>>> Oprit Modul 3. Revenire la MENIUL PRINCIPAL...");
     currentMode = MODE_SELECT_MENU;
     printMainMenu();
 }
@@ -385,9 +399,10 @@ void setup() {
 
     Serial.begin(115200);
 
-    // Initializam pinul CS pentru IMU pe HIGH
-    pinMode(IMU_CS_PIN, OUTPUT);
-    digitalWrite(IMU_CS_PIN, HIGH);
+    // Initializare pini SPI1 pentru IMU (BlackPill F411CE)
+    SPI.setSCLK(PA5);
+    SPI.setMISO(PA6);
+    SPI.setMOSI(PA7);
 
     // Initializare pini motoare in stare de siguranta (1000us)
     for (int i = 0; i < 4; i++) {
@@ -433,7 +448,7 @@ void loop() {
             } else {
                 Serial.print("\nOptiune invalida: '");
                 Serial.print(c);
-                Serial.println("'. Alege '1' (Motoare), '2' (Calibrare) sau '3' (Test IMU 135°).");
+                Serial.println("'. Alege '1' (Motoare), '2' (Calibrare) sau '3' (Test IMU + Motoare).");
                 printMainMenu();
             }
         }

@@ -5,26 +5,25 @@
 // CONFIGURARE PINI ESP32 -> SX1262
 // ==========================================
 #define NSS_PIN   5
-#define DIO1_PIN  4   // S-A MODIFICAT DE LA 2 LA 4 (Pinul 2 e periculos pe ESP32)
+#define DIO1_PIN  4
 #define NRST_PIN  14
 #define BUSY_PIN  32
 
-#define LED_PIN   2   // LED-ul albastru built-in pe ESP32
+#define LED_PIN   2   // LED albastru built-in pe ESP32
 
-// Instanțierea modulului SX1262
-Module* mod = new Module(NSS_PIN, DIO1_PIN, NRST_PIN, BUSY_PIN);
-SX1262 radio(mod);
+Module* mod = nullptr;
+SX1262* radio = nullptr;
 
 // ==========================================
 // VARIABILE GLOBALE
 // ==========================================
 volatile bool loraReceivedFlag = false;
 
-uint8_t serialBuf[256];
+uint8_t serialBuf[250]; // Buffer limitat la 250 bytes pentru siguranță SX1262 FIFO
 size_t serialLen = 0;
 unsigned long lastSerialTime = 0;
 
-// Funcția chemată automat (Interrupt) când modulul LoRa primește un pachet
+// Întrerupere recepție LoRa (DIO1)
 void IRAM_ATTR setFlag() {
     loraReceivedFlag = true;
 }
@@ -35,95 +34,100 @@ void setup() {
     
     // Comunicarea cu Ground Station (Laptop/C++)
     Serial.begin(115200);
-    while (!Serial); // Așteaptă conectarea portului serial
+    delay(500);
 
-    // Forțăm SPI-ul să folosească exact pinii hardware (SCK, MISO, MOSI).
-    // ATENȚIE: Ultimul pin trebuie să fie -1 (NU NSS_PIN).
-    // Dacă dăm pinul de CS către driverul hardware SPI, librăria RadioLib nu-l mai poate controla manual!
-    SPI.begin(18, 19, 23, -1);
+    // Inițializare magistrală hardware SPI (VSPI: 18=SCK, 19=MISO, 23=MOSI, 5=CS)
+    SPI.begin(18, 19, 23, 5);
 
-    // Inițializare modul LoRa cu ACELEAȘI SETĂRI CA PE DRONĂ
-    // begin(freq, bw, sf, cr, syncWord, power)
-    // Frecvență: 868.0 MHz, BW: 500.0 kHz, SF: 7, CR: 5 (adică 4/5), Sync: 0x12, Pwr: +22 dBm
-    int state = radio.begin(868.0, 500.0, 7, 5, 0x12, 22);
+    // Creăm instanțele după pornirea SPI
+    mod = new Module(NSS_PIN, DIO1_PIN, NRST_PIN, BUSY_PIN);
+    radio = new SX1262(mod);
+
+    // Inițializare cu parametrii hardware confirmați:
+    // Freq: 868.0 MHz, BW: 500.0 kHz, SF: 7, CR: 5, Sync: 0x12, Pwr: +22 dBm, Preamble: 8, TCXO: 3.3V, LDO: false
+    int state = radio->begin(868.0, 500.0, 7, 5, 0x12, 22, 8, 3.3f, false);
 
     if (state == RADIOLIB_ERR_NONE) {
-        // Afișăm un mesaj clar pentru a ști că a mers!
+        // Activăm comutarea automată a antenei prin DIO2 (esențial pentru raza de acțiune)
+        radio->setDio2AsRfSwitch(true);
+
+        // Curățăm flag-ul și activăm modul de ascultare continuă
+        loraReceivedFlag = false;
+        radio->setDio1Action(setFlag);
+        radio->startReceive();
+
         Serial.println("\n[OK] ESP32 LoRa Bridge PORNIT! Astept MAVLink...");
-        
-        // Setăm pinul DIO1 să declanșeze o întrerupere la recepție
-        radio.setDio1Action(setFlag);
-        
-        // Punem modulul în modul de ascultare
-        radio.startReceive();
+        digitalWrite(LED_PIN, HIGH);
+        delay(200);
+        digitalWrite(LED_PIN, LOW);
     } else {
-        // Eroare la inițializare - o vom trimite pe Serial ca text pentru debugging (GCS o va ignora dacă nu e MAVLink)
         Serial.print("Eroare initializare LoRa, cod: ");
         Serial.println(state);
-        while (true); // Blocare sistem în caz de eroare
+        while (true) {
+            // Pâlpâire rapidă în caz de eroare
+            digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+            delay(100);
+        }
     }
 }
 
 void loop() {
     // ========================================================
-    // 1. RECEPȚIE DE LA GROUND STATION (SERIAL) -> LORA
+    // 1. RECEPȚIE DE LA GROUND STATION (SERIAL / USB) -> LORA
     // ========================================================
-    // Citim tot ce vine de la aplicația C++ prin USB
     while (Serial.available()) {
         if (serialLen < sizeof(serialBuf)) {
             serialBuf[serialLen++] = Serial.read();
             lastSerialTime = millis();
         } else {
-            // Buffer plin, aruncăm surplusul (un pachet de control are doar ~21 bytes)
-            Serial.read(); 
+            Serial.read(); // Previne buffer overflow
         }
     }
 
-    // Dacă am primit date și a trecut o scurtă pauză (10 ms) de la ultimul byte,
-    // înseamnă că s-a terminat de transmis pachetul MAVLink curent
-    if (serialLen > 0 && (millis() - lastSerialTime > 10)) {
-        digitalWrite(LED_PIN, HIGH); // Aprindem LED-ul pe durata emisiei
+    // Dacă a trecut o scurtă pauză (4 ms) de la ultimul byte, pachetul MAVLink s-a terminat
+    if (serialLen > 0 && (millis() - lastSerialTime > 4)) {
+        digitalWrite(LED_PIN, HIGH);
         
-        // Oprim ascultarea pe DIO1 ca să nu o confundăm cu sfârșitul transmisiei
-        radio.clearDio1Action();
+        // Oprim ascultarea pe DIO1 pe durata transmisiei
+        radio->clearDio1Action();
         
-        // Transmitem pachetul spre Dronă
-        radio.transmit(serialBuf, serialLen);
+        // Transmitem comanda către Dronă prin LoRa
+        radio->transmit(serialBuf, serialLen);
         
         // Resetăm buffer-ul serial
         serialLen = 0;
         
-        // Revenim imediat la modul de recepție
-        radio.setDio1Action(setFlag);
-        radio.startReceive();
+        // CRITIC: Resetăm flag-ul înainte de a reveni în recepție (previne citiri fantomă)
+        loraReceivedFlag = false;
+        radio->setDio1Action(setFlag);
+        radio->startReceive();
         
-        digitalWrite(LED_PIN, LOW); // Stingem LED-ul
+        digitalWrite(LED_PIN, LOW);
     }
 
     // ========================================================
-    // 2. RECEPȚIE DE LA DRONĂ (LORA) -> GROUND STATION
+    // 2. RECEPȚIE TELEMETRIE DE LA DRONĂ (LORA) -> SERIAL / USB
     // ========================================================
     if (loraReceivedFlag) {
         loraReceivedFlag = false;
 
-        // Aflăm lungimea pachetului recepționat
-        size_t len = radio.getPacketLength();
-        if (len > 0 && len <= 256) {
-            uint8_t loraBuf[256];
-            int state = radio.readData(loraBuf, len);
+        size_t len = radio->getPacketLength();
+        if (len > 0 && len <= sizeof(serialBuf)) {
+            uint8_t loraBuf[250];
+            int state = radio->readData(loraBuf, len);
 
             if (state == RADIOLIB_ERR_NONE) {
-                // Trimitem instantaneu datele primite către aplicația C++ (GCS)
-                // Serial.write trimite byți bruti, ceea ce MAVLink are nevoie
+                // Trimitem datele brute MAVLink către aplicația C++ (GCS)
                 Serial.write(loraBuf, len);
                 
-                // Pâlpâim scurt LED-ul pentru a indica recepția pe PC
+                // Puls vizual scurt
                 digitalWrite(LED_PIN, HIGH);
-                delay(2);
+                delay(1);
                 digitalWrite(LED_PIN, LOW);
             }
         }
-        // După citire, reintrăm în modul de ascultare
-        radio.startReceive();
+        
+        // Asigurăm reintrarea în ascultare
+        radio->startReceive();
     }
 }

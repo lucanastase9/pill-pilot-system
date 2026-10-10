@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 PIDController::PIDController(float p, float i, float d, float i_limit, float min_out, float max_out)
-    : kp(p), ki(i), kd(d), kf(0.0f), integral(0.0f), previousMeasured(0.0f),
+    : kp(p), ki(i), kd(d), kf(0.0f), integral(0.0f), previousMeasured(0.0f), previousError(0.0f),
       iMax(i_limit), integralLimit(0.0f), outputMin(min_out), outputMax(max_out), deadband(0.0f) {
     if (ki > 0.0f) {
         integralLimit = iMax / ki;
@@ -23,8 +23,9 @@ float PIDController::compute(float setpoint, float measuredValue, float dt) {
     // 1. Termenul Proporțional (P)
     float pTerm = kp * error;
 
-    // 2. Termenul Integrator (I) cu protecție Anti-Windup optimizată
-    integral += error * dt;
+    // 2. Termenul Integrator (I) cu protecție Anti-Windup optimizată (regula trapezului)
+    integral += (error + previousError) * 0.5f * dt;
+    previousError = error;
     if (ki > 0.0f) {
         integral = constrain(integral, -integralLimit, integralLimit);
     }
@@ -46,6 +47,7 @@ float PIDController::compute(float setpoint, float measuredValue, float dt) {
 void PIDController::reset() {
     integral = 0.0f;
     previousMeasured = 0.0f;
+    previousError = 0.0f;
 }
 
 float PIDController::getP() const { return kp; }

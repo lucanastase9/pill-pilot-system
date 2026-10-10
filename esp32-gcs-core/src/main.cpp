@@ -79,27 +79,34 @@ int main(int argc, char* argv[]) {
         }
 
         // =========================================================
-        // 2. CALCUL VALORI MANȘE (INPUT CONTINUU)
+        // 2. CALCUL COMENZI DISCRETE (D-PAD & BUTOANE)
         // =========================================================
         if (input.throttleUp)   currentThrottle += 5;
         if (input.throttleDown) currentThrottle -= 5;
-        if (input.yawRight)     currentYaw += 20;
-        if (input.yawLeft)      currentYaw -= 20;
-
         if (currentThrottle > 2000) currentThrottle = 2000;
         if (currentThrottle < 1000) currentThrottle = 1000;
 
-        if (!input.yawLeft && !input.yawRight) {
-            if (currentYaw > 0) currentYaw = std::max(0, currentYaw - 25);
-            if (currentYaw < 0) currentYaw = std::min(0, currentYaw + 25);
-        }
-        if (currentYaw > 1000) currentYaw = 1000;
-        if (currentYaw < -1000) currentYaw = -1000;
+        // Yaw discret (valoare fixă cât timp e apăsat, instant 0 la eliberare)
+        currentYaw = 0;
+        if (input.yawRight) currentYaw =  300; // ~12 deg/s pe dronă
+        if (input.yawLeft)  currentYaw = -300; // ~ -12 deg/s pe dronă
+
+        // Comenzi discrete D-Pad (Logitech Precision)
+        // 500 corespunde pe STM32 la (500 / 1000.0) * 20.0 = 10.0 grade
+        const int FIXED_ANGLE_CMD = 500;
 
         int pitchOut = 0;
         int rollOut = 0;
-        if (std::abs(input.pitch) > 3000) pitchOut = (input.pitch * 1000) / 32767;
-        if (std::abs(input.roll) > 3000)  rollOut = (input.roll * 1000) / 32767;
+
+        // D-Pad Înainte (botul în jos pentru înaintare) -> -FIXED_ANGLE_CMD
+        if (input.dpadUp)   pitchOut = -FIXED_ANGLE_CMD;
+        // D-Pad Înapoi (botul în sus pentru frânare/recul) -> +FIXED_ANGLE_CMD
+        if (input.dpadDown) pitchOut =  FIXED_ANGLE_CMD;
+
+        // D-Pad Dreapta (înclinare dreapta) -> +FIXED_ANGLE_CMD
+        if (input.dpadRight) rollOut =  FIXED_ANGLE_CMD;
+        // D-Pad Stânga (înclinare stânga) -> -FIXED_ANGLE_CMD
+        if (input.dpadLeft)  rollOut = -FIXED_ANGLE_CMD;
 
         // =========================================================
         // 3. MEMORAREA APĂSĂRILOR (EDGE DETECTION + SMART TOGGLE)

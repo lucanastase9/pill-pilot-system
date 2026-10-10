@@ -768,8 +768,25 @@ InputState GuiManager::processEvents(PIDConfig& pidConfig) {
     if (joystick) {
         SDL_JoystickUpdate();
 
-        input.roll  = SDL_JoystickGetAxis(joystick, 0);
-        input.pitch = SDL_JoystickGetAxis(joystick, 1);
+        // 1. Suport Hat Switch (D-Pad standard)
+        if (SDL_JoystickNumHats(joystick) > 0) {
+            Uint8 hat = SDL_JoystickGetHat(joystick, 0);
+            if (hat & SDL_HAT_UP)    input.dpadUp = true;
+            if (hat & SDL_HAT_DOWN)  input.dpadDown = true;
+            if (hat & SDL_HAT_LEFT)  input.dpadLeft = true;
+            if (hat & SDL_HAT_RIGHT) input.dpadRight = true;
+        }
+
+        // 2. Suport D-Pad pe Axe (Logitech Precision USB HID pe Linux/Windows)
+        Sint16 axisX = SDL_JoystickGetAxis(joystick, 0);
+        Sint16 axisY = SDL_JoystickGetAxis(joystick, 1);
+        if (axisY < -16000) input.dpadUp = true;
+        if (axisY >  16000) input.dpadDown = true;
+        if (axisX < -16000) input.dpadLeft = true;
+        if (axisX >  16000) input.dpadRight = true;
+
+        input.roll  = axisX;
+        input.pitch = axisY;
 
         input.kill         = SDL_JoystickGetButton(joystick, 0) == 1;
         input.yawLeft      = SDL_JoystickGetButton(joystick, 4) == 1;
@@ -785,6 +802,14 @@ InputState GuiManager::processEvents(PIDConfig& pidConfig) {
     if (keyState[SDL_SCANCODE_B]) input.calibrate = true;
     if (keyState[SDL_SCANCODE_W]) input.throttleUp = true;
     if (keyState[SDL_SCANCODE_S]) input.throttleDown = true;
+
+    // Fallback tastatură: săgeți direcționale și taste Q/E pentru Yaw
+    if (keyState[SDL_SCANCODE_UP])    input.dpadUp = true;
+    if (keyState[SDL_SCANCODE_DOWN])  input.dpadDown = true;
+    if (keyState[SDL_SCANCODE_LEFT])  input.dpadLeft = true;
+    if (keyState[SDL_SCANCODE_RIGHT]) input.dpadRight = true;
+    if (keyState[SDL_SCANCODE_Q])     input.yawLeft = true;
+    if (keyState[SDL_SCANCODE_E])     input.yawRight = true;
 
     if (input.calibrate) {
         calibrateEndTime = SDL_GetTicks() + 10000;

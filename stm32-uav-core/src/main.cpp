@@ -13,25 +13,25 @@
 
 
 // ==========================================
-// 1. INSTANȚIEREA OBIECTELOR (MODULELOR)
+// 1. INSTANTIEREA MODULELOR
 // ==========================================
-IMUManager imu(PA4);                       // BMI160 pe SPI1
-ESCManager esc(PA0, PA1, PA2, PA3);        // PWM ESC
-SPIClass SPI_2(PB15, PB14, PB13);
+IMUManager imu(PA4, PA5, PA6, PA7);                              // chip select pt BMI160
+ESCManager esc(PA0, PA1, PA2, PA3);                              // PWM ESC
+SPIClass SPI_2(PB15, PB14, PB13);                  // setare SPI2 pentru frecventa mica
 LoRaManager lora(SPI_2, PB12, PA8, PA10, PA9); // LoRa pe SPI2
-BarometerManager baro;                     // MS5611 pe I2C
+BarometerManager baro;                                           // MS5611 pe I2C
 
 // ==========================================
 // CONTROLERE PID CASCADATE
 // ==========================================
-// Outer Loop: Angle Controllers (Doar P-term activ, ieșire în °/s)
-PIDController rollAnglePID(3.5f, 0.0f, 0.0f, 0.0f, -180.0f, 180.0f);
-PIDController pitchAnglePID(3.5f, 0.0f, 0.0f, 0.0f, -180.0f, 180.0f);
+// bucla exterioara de unghi (primesc unghiul dorit si calculeaza o viteza unghiulara tinta, limitata la +/- 150 °/s)
+PIDController rollAnglePID(1.5f, 0.0f, 0.0f, 0.0f, -150.0f, 150.0f);
+PIDController pitchAnglePID(1.5f, 0.0f, 0.0f, 0.0f, -150.0f, 150.0f);
 
-// Inner Loop: Rate Controllers (PID complet, ieșire în unități PWM)
-PIDController rollRatePID(1.2f, 0.05f, 0.02f, 100.0f, -350.0f, 350.0f);
-PIDController pitchRatePID(1.2f, 0.05f, 0.02f, 100.0f, -350.0f, 350.0f);
-PIDController yawRatePID(2.0f, 0.1f, 0.0f, 100.0f, -300.0f, 300.0f);
+// bucla interioara de PWM (pentru teste pe stand: P moderat, I=0 si D=0 pentru eliminarea socurilor)
+PIDController rollRatePID(1.5f, 0.0f, 0.0f, 0.0f, -300.0f, 300.0f);
+PIDController pitchRatePID(1.5f, 0.0f, 0.0f, 0.0f, -300.0f, 300.0f);
+PIDController yawRatePID(2.0f, 0.0f, 0.0f, 0.0f, -300.0f, 300.0f);
 
 // Filtre pentru Setpoint Smoothing (Netezirea comenzilor de pe butoane)
 PT1Filter targetRollFilter;
@@ -110,13 +110,13 @@ void setup() {
     Wire.begin();
     Wire.setClock(400000);
 
-    // Initializare setpoint smoothing
-    targetRollFilter.setCutoffFreq(5.0f);  
-    targetPitchFilter.setCutoffFreq(5.0f);
-    targetYawFilter.setCutoffFreq(5.0f);
+    // Initializare setpoint smoothing (1.5 Hz pentru tranzitie lina la butoane)
+    targetRollFilter.setCutoffFreq(1.5f);  
+    targetPitchFilter.setCutoffFreq(1.5f);
+    targetYawFilter.setCutoffFreq(1.5f);
 
-    rollRatePID.setFeedforward(0.1f);
-    pitchRatePID.setFeedforward(0.1f);
+    rollRatePID.setFeedforward(0.0f);
+    pitchRatePID.setFeedforward(0.0f);
     yawRatePID.setFeedforward(0.0f);
 
     rollAnglePID.setDeadband(0.2f);
@@ -128,11 +128,6 @@ void setup() {
     esc.init();
     
     Serial.println("Initializare SPI1 (Fortare pini hardware pentru IMU)...");
-    SPI.setSCLK(PA5);
-    SPI.setMISO(PA6);
-    SPI.setMOSI(PA7);
-    // NU chemam SPI.begin() aici, libraria o va face!
-    
     Serial.println("Initializare IMU...");
     if (imu.init()) {
         Serial.println("[OK] Senzor BMI160 conectat.");
@@ -220,9 +215,9 @@ void loop() {
     }
 
     // ========================================================
-    // BUCLA MEDIE: 50 Hz (BAROMETRU)
+    // BUCLA LENTA: 10 Hz (BAROMETRU - doar telemetrie altitudine)
     // ========================================================
-    if (currentMillis - lastMediumLoop >= 20) {
+    if (currentMillis - lastMediumLoop >= 100) { // 10 Hz (100 ms)
         lastMediumLoop = currentMillis;
         baro.update();
     }
@@ -252,9 +247,9 @@ void loop() {
                         if(currentThrottle < 1000) currentThrottle = 1000;
                         if(currentThrottle > 2000) currentThrottle = 2000;
 
-                        targetPitchAngle = (manual.x / 1000.0f) * 30.0f;
-                        targetRollAngle  = (manual.y / 1000.0f) * 30.0f;
-                        targetYawRate    = (manual.r / 1000.0f) * 150.0f; 
+                        targetPitchAngle = (manual.x / 1000.0f) * 20.0f;
+                        targetRollAngle  = (manual.y / 1000.0f) * 20.0f;
+                        targetYawRate    = (manual.r / 1000.0f) * 40.0f; 
 
                         uint16_t buttons = manual.buttons;
 

@@ -10,6 +10,12 @@ struct InputState {
     int pitch = 0; // Axa X (Înainte / Înapoi)
     int roll = 0;  // Axa Y (Stânga / Dreapta)
 
+    // D-Pad (Logitech Precision & tastatură)
+    bool dpadUp = false;
+    bool dpadDown = false;
+    bool dpadLeft = false;
+    bool dpadRight = false;
+
     // Butoane
     bool arm = false;          // Index 9
     bool calibrate = false;    // Index 8

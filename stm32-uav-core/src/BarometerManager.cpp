@@ -5,7 +5,7 @@ bool BarometerManager::init() {
     if (!ms5611.begin()) {
         return false;
     }
-    ms5611.setOversampling(OSR_ULTRA_HIGH);
+    ms5611.setOversampling(OSR_ULTRA_LOW); // conversie rapida de ~1ms in loc de 18ms
     return true;
 }
 

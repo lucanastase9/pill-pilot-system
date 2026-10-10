@@ -6,6 +6,7 @@ private:
     float kp, ki, kd, kf;
     float integral;
     float previousMeasured;
+    float previousError;
     float iMax;          // Limita Anti-Windup teoretică
     float integralLimit; // Limita precalculată (iMax / ki)
     float outputMin;     // Limita minima de ieșire
