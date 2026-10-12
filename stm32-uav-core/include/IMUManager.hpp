@@ -13,6 +13,7 @@ private:
     uint8_t misoPin;
     uint8_t mosiPin;
     bool    initialized;
+    bool    calibrated;
 
     //iesirile finale din imu
     float roll;          // unghi roll curent final (grade)
@@ -35,7 +36,7 @@ private:
     PT1Filter gyroFilterZ;
 
     //pentru filtru complementar roll si pitch
-    float complementaryAlpha;
+    float filterTau;
 
     //constante
     static constexpr float EXPECTED_1G = 16384.0f;      //acceleratia gravitationala presupusa
@@ -51,15 +52,15 @@ public:
     void update(float dt);
     //configurare filtre
     void setGyroLPF(float cutoff_hz);
-    void setComplementaryAlpha(float alpha);
+    void setFilterTau(float tau_seconds) { filterTau = tau_seconds; }
     //functii getter
-    inline float getComplementaryAlpha() const { return complementaryAlpha; }
     inline float getRoll() const { return roll; }
     inline float getPitch() const { return pitch; }
     inline float getGyroX() const { return gyroRateX; }
     inline float getGyroY() const { return gyroRateY; }
     inline float getGyroZ() const { return gyroRateZ; }
     inline bool  isInitialized() const { return initialized; }
+    inline bool  isCalibrated() const { return calibrated; }
 };
 
 #endif // IMU_MANAGER_HPP

@@ -8,6 +8,7 @@ IMUManager::IMUManager(uint8_t cs_pin, uint8_t sck_pin, uint8_t miso_pin, uint8_
       misoPin(miso_pin),
       mosiPin(mosi_pin),
       initialized(false),
+      calibrated(false),
       roll(0.0f),
       pitch(0.0f),
       gyroRateX(0.0f),
@@ -22,8 +23,7 @@ IMUManager::IMUManager(uint8_t cs_pin, uint8_t sck_pin, uint8_t miso_pin, uint8_
       gyroFilterX(),
       gyroFilterY(),
       gyroFilterZ(),
-      complementaryAlpha(0.98f) {
-    // setam frecventa de taiere pentru filtrul PT1 la 40Hz
+      filterTau(1.0f) {
     setGyroLPF(40.0f);
 }
 
@@ -32,11 +32,6 @@ void IMUManager::setGyroLPF(float cutoff_hz) {
     gyroFilterX.setCutoffFreq(cutoff_hz);
     gyroFilterY.setCutoffFreq(cutoff_hz);
     gyroFilterZ.setCutoffFreq(cutoff_hz);
-}
-void IMUManager::setComplementaryAlpha(float alpha) {
-    if (alpha < 0.0f) alpha = 0.0f;
-    if (alpha > 1.0f) alpha = 1.0f;
-    complementaryAlpha = alpha;
 }
 
 //initializeaza hardware senzorul bmi160 in modul SPI
@@ -65,6 +60,8 @@ bool IMUManager::init() {
         // configuram hardware DLPF pentru eliminarea frecventelor foarte inalte
         BMI160.setGyroDLPFMode(BMI160_DLPF_MODE_NORM);
         BMI160.setAccelDLPFMode(BMI160_DLPF_MODE_NORM);
+        BMI160.setGyroRate(800);
+        BMI160.setAccelerometerRate(800);
         roll = 0.0f;
         pitch = 0.0f;
         initialized = true;
@@ -106,6 +103,7 @@ void IMUManager::calibrate() {
     // asezam roll si pitchul la 0
     roll = 0.0f;
     pitch = 0.0f;
+    calibrated = true;
 }
 
 //actualizarea citirilor in zbor(inner loop)
@@ -145,6 +143,7 @@ void IMUManager::update(float dt) {
     float accRoll  = atan2(ay_drone, az_drone) * RAD_TO_DEG;
     float accPitch = atan2(-ax_drone, sqrt(ay_drone * ay_drone + az_drone * az_drone)) * RAD_TO_DEG;
     //filtru pe unghiurile de pitch si roll
-    roll  = complementaryAlpha * (roll + gyroRateX * dt) + (1.0f - complementaryAlpha) * accRoll;
-    pitch = complementaryAlpha * (pitch + gyroRateY * dt) + (1.0f - complementaryAlpha) * accPitch;
+    float alpha = filterTau / (filterTau + dt);
+    roll  = alpha * (roll + gyroRateX * dt) + (1.0f - alpha) * accRoll;
+    pitch = alpha * (pitch + gyroRateY * dt) + (1.0f - alpha) * accPitch;
 }

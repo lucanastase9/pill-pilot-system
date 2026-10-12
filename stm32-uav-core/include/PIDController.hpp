@@ -1,21 +1,20 @@
 #ifndef PID_CONTROLLER_HPP
 #define PID_CONTROLLER_HPP
+#include "Filter.hpp"
 
 class PIDController {
 private:
-    float kp, ki, kd, kf;
+    float kp, ki, kd;
     float integral;
     float previousMeasured;
     float previousError;
-    float iMax;          // Limita Anti-Windup teoretică
-    float integralLimit; // Limita precalculată (iMax / ki)
     float outputMin;     // Limita minima de ieșire
     float outputMax;     // Limita maxima de ieșire
-    float deadband;      // Zona moartă pentru eroare
-
+    bool  firstSample;
+    PT1Filter dFilter;
 
 public:
-    PIDController(float p, float i, float d, float i_limit, float min_out, float max_out);
+    PIDController(float p, float i, float d, float min_out, float max_out, float d_cutoff_hz = 35.0f);
 
     // Calculează ieșirea PID în funcție de Setpoint (țintă) și starea reală
     float compute(float setpoint, float measuredValue, float dt);
@@ -30,13 +29,6 @@ public:
 
     // Permite ajustarea dinamică a parametrilor
     void setGains(float p, float i, float d);
-    
-    // Setează termenul Feedforward
-    void setFeedforward(float f);
-
-    // Setează zona moartă (deadband)
-    void setDeadband(float d);
-
 };
 
 #endif

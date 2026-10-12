@@ -33,8 +33,8 @@ void ESCManager::init() {
         channels[i] = STM_PIN_CHANNEL(pinmap_function(digitalPinToPinName(pins[i]), PinMap_PWM));
         timer->setMode(channels[i], TIMER_OUTPUT_COMPARE_PWM1, pins[i]);
     }
-    // setam frecventa la 500Hz
-    timer->setOverflow(500, HERTZ_FORMAT);
+    // setam frecventa la 400Hz
+    timer->setOverflow(400, HERTZ_FORMAT);
     //plecam cu motoarele oprite
     stopAll();
     //pornim timerul hardware
